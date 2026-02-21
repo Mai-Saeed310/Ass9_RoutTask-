@@ -1,6 +1,7 @@
 import { userModel } from "../../models/users.model.js";
 import { VerifyToken } from "./token.js";
 import * as db_service from "../../DB/db.service.js";
+import { SECRET_KEY } from "../../../config/config.service.js";
 
 
 export const authentication = async (req, res, next) => {
@@ -10,7 +11,7 @@ export const authentication = async (req, res, next) => {
         throw new Error("token not exist");
     }
     // if user is login --> then verify the token 
-    const decoded = VerifyToken({ token: authorization, secret_key: "Eng.Mai" })
+    const decoded = VerifyToken({ token: authorization, secret_key: SECRET_KEY})
 
     if (!decoded || !decoded?.id) {
         throw new Error("inValid token");

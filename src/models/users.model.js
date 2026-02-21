@@ -1,30 +1,29 @@
 import mongoose from "mongoose";
-import { genderEnum, providerEnum } from "../common/enum/user.enum.js";
+import { genderEnum, providerEnum, roleEnum } from "../common/enum/user.enum.js";
 const { Schema } = mongoose;
 
 const userSchema = new Schema({
 firstName: {
         type: String,
         required: true,
-        minLength: 3,
-        maxLength: 6,
+        minLength: 2,
+        maxLength: 20,
         trim: true,
     },
 lastName: {
         type: String,
         minLength: 3,
-        maxLength: 6,
+        maxLength: 20,
         trim: true,
         required: true
     },
 gender: {
         type: String,
         enum: Object.values(genderEnum),
-        default: genderEnum.male
+        default: genderEnum.female
     },
 age: {
         type: Number,
-        required: true,
         min: 20,
         max: 60
     },
@@ -34,28 +33,31 @@ age: {
     unique: true,
     trim: true,
 },
+role: {
+        type: String,
+        enum: Object.values(roleEnum),
+        default: roleEnum.user
+    },
 password: {
     type: String,
-    required: true,
     minLength: 6,
-    select: false
+    select: false,
+    required: function (){
+        return this.provider == providerEnum.Google ? false : true
+    },
+
 },
 phone: { 
-        type: String, 
-        required: true 
+        type: String
     },
     profilePicture: String,
     // for checking if a user has verified his email.
-confirmed: {
-   type: Boolean,
-   default: false
-},
+    confirmed: Boolean,
     provider: {
         type: String,
         enum: Object.values(providerEnum),
         default: providerEnum.System
-    },
-    otp: String
+    }
 }, {
     timestamps: true,
     // ensures that Mongoose filters out any fields in the query that aren't defined in the schema,

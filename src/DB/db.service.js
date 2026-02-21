@@ -54,6 +54,7 @@ export const findById = async ({ model, id, options = {} } = {}) => {
   }
 
   return await doc.exec();
+
 }
 
 export const updateOne = async ({ model, filter = {}, update = {}, options = {} } = {}) => {

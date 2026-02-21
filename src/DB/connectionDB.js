@@ -1,11 +1,12 @@
 import mongoose from 'mongoose';
+import { DB_URI } from '../../config/config.service.js';
 
 
 
 export const checkConncetionDB = async () => {
   try {
 
-    await mongoose.connect("mongodb://localhost:27017/SarahaApp");
+    await mongoose.connect(DB_URI);
     console.log("Connection has been established successfully.");
 
 

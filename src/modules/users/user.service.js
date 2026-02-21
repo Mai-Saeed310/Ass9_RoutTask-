@@ -7,6 +7,8 @@ import * as db_service from "../../DB/db.service.js";
 import { Compare, Hash } from "../../common/securiity/hash.security.js";
 import { decrypt, encrypt } from "../../common/securiity/encrypt.security.js";
 import { GenerateToken, VerifyToken } from "../middlewares/token.js";
+import {OAuth2Client} from 'google-auth-library';
+import { SALT_ROUNDS, SECRET_KEY } from "../../../config/config.service.js";
 
 export const signUp = async (req, res, next) => {
     const { userName, email, password, age, gender, phone } = req.body;
@@ -20,18 +22,18 @@ export const signUp = async (req, res, next) => {
         throw new Error("Email already exists",{cause:409});
     }
 
-const otp = Math.floor(1000 + Math.random() * 9000).toString();
+// const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
     const user = await db_service.create({
         model: userModel,
         data: {
             userName,
             email,
-            password: Hash({ plainText: password, salt_rounds: 10 }),
+            password: Hash({ plainText: password, salt_rounds: SALT_ROUNDS }),
             age,
             gender,
             phone: encrypt(phone),
-            otp,                
+            // otp,                
             confirmed: false    
         }
     });
@@ -61,7 +63,7 @@ const userExist = await userModel
 }
 
    // 3. generate token 
-   const token = GenerateToken({payload: { id: userExist._id}, secret_key: "Eng.Mai",options : {expiresIn: "1h"}}); 
+   const token = GenerateToken({payload: { id: userExist._id}, secret_key: SECRET_KEY,options : {expiresIn: "1h"}}); 
 
     // 4. Success response
     return res.status(200).json({
@@ -108,6 +110,59 @@ export const verifyOTP = async (req, res, next) => {
 };
 
 
+export const signUpWithGmail = async (req, res, next) => {
+
+    const { idToken } = req.body;
+
+        const client = new OAuth2Client();
+
+        const ticket = await client.verifyIdToken({
+            idToken,
+            // client iid
+            audience: "306179961159-qe9939gkskc5r36n319sguvd87ddj7n1.apps.googleusercontent.com",
+        });
+
+        const payload = ticket.getPayload();
+        const { email, email_verified, name, picture } = payload;
+
+        let user = await db_service.findOne({
+            model: userModel,
+            filter: { email }
+        });
+
+        if (!user) {
+            user = await db_service.create({
+                model: userModel,
+                data: {
+                    email,
+                    confirmed: email_verified,
+                    userName: name,
+                    profilePicture: picture,
+                    provider: providerEnum.Google
+                }
+            });
+        }
+
+        if (user.provider === providerEnum.System) {
+            throw new Error("please log in on system only", { cause: 400 });
+        }
+
+        const access_token = GenerateToken({
+            payload: {
+                id: user._id,
+                email: user.email
+            },
+            secret_key: SECRET_KEY,
+            options: {
+                expiresIn: "1d",
+            }
+        });
+
+        return res.status(200).json({
+            message: "done",
+            access_token,
+            user
+        });
 
 
-
+};
