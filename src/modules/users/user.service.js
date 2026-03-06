@@ -8,7 +8,8 @@ import { Compare, Hash } from "../../common/securiity/hash.security.js";
 import { decrypt, encrypt } from "../../common/securiity/encrypt.security.js";
 import { GenerateToken, VerifyToken } from "../middlewares/token.js";
 import {OAuth2Client} from 'google-auth-library';
-import { SALT_ROUNDS, SECRET_KEY } from "../../../config/config.service.js";
+import { ACCESS_SECRET_KEY, PREFIX, REFRESH_SECRET_KEY, SALT_ROUNDS } from "../../../config/config.service.js";
+import cloudinary from "../../utilities/cloudinary.js";
 
 export const signUp = async (req, res, next) => {
     const { userName, email, password, age, gender, phone } = req.body;
@@ -22,21 +23,27 @@ export const signUp = async (req, res, next) => {
         throw new Error("Email already exists",{cause:409});
     }
 
-// const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    // const { public_id, secure_url } = await cloudinary.uploader.upload(req.file.path,{folder:"user/profile",resource_type:"image"}); 
+
+    // const otp = Math.floor(1000 + Math.random() * 9000).toString();
+
+    let arr_paths = []
+        for (const file of req.files.attachments) {
+            arr_paths.push(file.path)
+        }
 
     const user = await db_service.create({
         model: userModel,
         data: {
             userName,
             email,
-            password: Hash({ plainText: password, salt_rounds: SALT_ROUNDS }),
-            age,
+            password: Hash({ plainText: password }),
             gender,
             phone: encrypt(phone),
-            // otp,                
-            confirmed: false    
+            profilePicture:  req.files.attachment[0].path,
+            coverPictures: arr_paths
         }
-    });
+    })
 
     res.status(201).json({ message: "done", user });
 };
@@ -58,12 +65,13 @@ const userExist = await userModel
       throw new Error("Invalid password",{cause:400});
     }
 // OTP
-    if (!userExist.confirmed) {
-    throw new Error("Please verify your account", { cause: 400 });
-}
+//     if (!userExist.confirmed) {
+//     throw new Error("Please verify your account", { cause: 400 });
+// }
 
-   // 3. generate token 
-   const token = GenerateToken({payload: { id: userExist._id}, secret_key: SECRET_KEY,options : {expiresIn: "1h"}}); 
+   // 3. generate tokens
+   const access_token = GenerateToken({payload: { id: userExist._id}, secret_key: ACCESS_SECRET_KEY, options : {expiresIn: "1h"}}); 
+   const refresh_token = GenerateToken({payload: { id: userExist._id}, secret_key: REFRESH_SECRET_KEY, options : {expiresIn: "1y"}}); 
 
     // 4. Success response
     return res.status(200).json({
@@ -72,7 +80,8 @@ const userExist = await userModel
             ...userExist._doc,
             phone: decrypt(userExist.phone)
         },
-        token: token
+        access_token: access_token,
+        refresh_token: refresh_token
     });
 };
 
@@ -108,7 +117,6 @@ export const verifyOTP = async (req, res, next) => {
         message: "Account verified successfully"
     });
 };
-
 
 export const signUpWithGmail = async (req, res, next) => {
 
@@ -164,5 +172,97 @@ export const signUpWithGmail = async (req, res, next) => {
             user
         });
 
+
+};
+
+export const refreshToken = async (req, res, next) => {
+    const { authorization } = req.headers;
+
+    if (!authorization) {
+        throw new Error("token not exist");
+    }
+    const [prefix,token] = authorization.split(" "); 
+       if(prefix !== PREFIX){
+        throw new Error("inValid prefix");        
+        }
+
+    const decoded = VerifyToken({ 
+        token: token, 
+        secret_key: REFRESH_SECRET_KEY
+    });
+
+    if (!decoded || !decoded?.id) {
+        throw new Error("inValid token");
+    }
+    const user = await db_service.findOne({ 
+        model: userModel, 
+        filter: { _id: decoded.id } 
+    });
+    if (!user) {
+        throw new Error("user not exist", { cause: 400 });
+    }
+    const refresh_token = GenerateToken({
+        payload: {
+            id: user._id,
+            email: user.email,
+        },
+        secret_key: ACCESS_SECRET_KEY,
+        options: {
+            expiresIn: "1h",
+        }
+    });
+    return res.json({ message: "refresh_token created successfully.", refresh_token: { refresh_token } });
+};
+
+export const shareProfile = async (req, res, next) => {
+    const { id } = req.params;
+    const user = await db_service.findById({ model: userModel, id, options: { select: "-password -provider -createdAt -provider -updatedAt -__v" }});
+    
+    if (!user) {
+        throw new Error("user not exist yet");
+    }
+
+    if (user.phone) {
+    user.phone = decrypt(user.phone);
+    }
+
+    return res.status(200).json({data: user});
+
+};
+
+export const updateProfile = async (req, res, next) => {
+   let {firstName, lastName, gender, age, phone} = req.body;
+   if(phone){
+     phone = encrypt(phone)
+   }
+   const user = await db_service.findOneAndUpdate({
+    model: userModel, 
+    filter: {_id: req.user._id},
+    update: {firstName, lastName, gender, age, phone}
+   });
+
+    if (!user){
+        throw new Error("user does not exist");
+    }
+
+    return res.status(200).json({message: "user updated successfully." , newUser: user});
+
+};
+
+
+export const updatePassword = async (req, res, next) => {
+  let { oldPassword, newPassword } = req.body
+
+    if (!Compare({ plainText: oldPassword, cipherText: req.user.password })) {
+        throw new Error("inValid old password");
+    }
+
+    const hash = Hash({ plainText: newPassword })
+
+    req.user.password = hash
+
+    await req.user.save()
+
+    return res.status(200).json({message: "password updated successfully." });
 
 };

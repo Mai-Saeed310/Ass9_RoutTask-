@@ -51,6 +51,17 @@ phone: {
         type: String
     },
     profilePicture: String,
+    // profilePicture: {
+    //     secure_url: {type:String, require:true},
+    //     public_id : {type:String, require:true}
+    // },
+    coverPictures: [String],
+
+    //    coverPictures: [{
+    //     secure_url: {type:String, require:true},
+    //     public_id : {type:String, require:true}
+    // }],
+
     // for checking if a user has verified his email.
     confirmed: Boolean,
     provider: {
