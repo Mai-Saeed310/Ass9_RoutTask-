@@ -55,8 +55,15 @@ phone: {
     //     secure_url: {type:String, require:true},
     //     public_id : {type:String, require:true}
     // },
-    coverPictures: [String],
-
+    coverPictures: {
+        type: [String],
+        default: []
+    },
+    
+    gallery: {
+        type: [String],
+        default: []
+    },
     //    coverPictures: [{
     //     secure_url: {type:String, require:true},
     //     public_id : {type:String, require:true}
@@ -68,7 +75,8 @@ phone: {
         type: String,
         enum: Object.values(providerEnum),
         default: providerEnum.System
-    }
+    },
+    changeCredential: Date 
 }, {
     timestamps: true,
     // ensures that Mongoose filters out any fields in the query that aren't defined in the schema,

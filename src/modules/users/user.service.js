@@ -8,8 +8,12 @@ import { Compare, Hash } from "../../common/securiity/hash.security.js";
 import { decrypt, encrypt } from "../../common/securiity/encrypt.security.js";
 import { GenerateToken, VerifyToken } from "../middlewares/token.js";
 import {OAuth2Client} from 'google-auth-library';
-import { ACCESS_SECRET_KEY, PREFIX, REFRESH_SECRET_KEY, SALT_ROUNDS } from "../../../config/config.service.js";
+import { ACCESS_SECRET_KEY, CLIENT_ID, PREFIX, REFRESH_SECRET_KEY, SALT_ROUNDS } from "../../../config/config.service.js";
 import cloudinary from "../../utilities/cloudinary.js";
+import { randomUUID } from "crypto";
+import { revokeTokenModel } from "../../models/revokeToken.model.js";
+import { deleteKey, get_key, keys, revoke_key, setValue } from "../../redis/redis.service.js";
+import fs from "node:fs";
 
 export const signUp = async (req, res, next) => {
     const { userName, email, password, age, gender, phone } = req.body;
@@ -22,14 +26,16 @@ export const signUp = async (req, res, next) => {
     if (emailExist) {
         throw new Error("Email already exists",{cause:409});
     }
-
     // const { public_id, secure_url } = await cloudinary.uploader.upload(req.file.path,{folder:"user/profile",resource_type:"image"}); 
-
     // const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
     let arr_paths = []
         for (const file of req.files.attachments) {
             arr_paths.push(file.path)
+        }
+
+        if (arr_paths.length === 2) {
+            throw new Error("Cover pictures must be exactly 2 images", { cause: 400 })
         }
 
     const user = await db_service.create({
@@ -69,9 +75,27 @@ const userExist = await userModel
 //     throw new Error("Please verify your account", { cause: 400 });
 // }
 
+    // to generate random token Id 
+    const jwtId = randomUUID();
    // 3. generate tokens
-   const access_token = GenerateToken({payload: { id: userExist._id}, secret_key: ACCESS_SECRET_KEY, options : {expiresIn: "1h"}}); 
-   const refresh_token = GenerateToken({payload: { id: userExist._id}, secret_key: REFRESH_SECRET_KEY, options : {expiresIn: "1y"}}); 
+   const access_token = GenerateToken({
+    payload: { id: userExist._id},
+    secret_key: ACCESS_SECRET_KEY,
+    options : {
+        expiresIn: "1h",
+        jwtid: jwtId
+
+    }
+   }); 
+
+   const refresh_token = GenerateToken({
+    payload: { id: userExist._id},
+    secret_key: REFRESH_SECRET_KEY,
+    options : {
+        expiresIn: "1y",
+        jwtid: jwtId
+    }
+    }); 
 
     // 4. Success response
     return res.status(200).json({
@@ -88,7 +112,19 @@ const userExist = await userModel
 export const getProfile = async (req, res, next) => {
 
     return res.status(200).json({message: "done", data: { ...req.user._doc, phone: decrypt(req.user.phone) }});
+// to apply cash concept 
+// const key = `profile::${req.user._id}`
 
+//     const userExist = await get({ key })
+//     if (userExist) {
+//         console.log("from cash");
+//         return successResponse({ res, data: userExist })
+//     }
+//     console.log("out cash");
+
+//     await set({ key, value: req.user, ttl: 60 })
+
+//     successResponse({ res, data: req.user })
 };
 
 export const verifyOTP = async (req, res, next) => {
@@ -127,7 +163,7 @@ export const signUpWithGmail = async (req, res, next) => {
         const ticket = await client.verifyIdToken({
             idToken,
             // client iid
-            audience: "306179961159-qe9939gkskc5r36n319sguvd87ddj7n1.apps.googleusercontent.com",
+            audience: CLIENT_ID,
         });
 
         const payload = ticket.getPayload();
@@ -201,6 +237,17 @@ export const refreshToken = async (req, res, next) => {
     if (!user) {
         throw new Error("user not exist", { cause: 400 });
     }
+
+     const revokeToken = await db_service.findOne({ 
+            model: revokeTokenModel, 
+            filter: { tokenId: decoded.jti } 
+            });
+    
+            if (revokeToken) {
+                throw new Error("Token revoked. Please login again.");
+            }
+
+            
     const refresh_token = GenerateToken({
         payload: {
             id: user._id,
@@ -244,11 +291,10 @@ export const updateProfile = async (req, res, next) => {
     if (!user){
         throw new Error("user does not exist");
     }
-
+// await deleteKey(`profile::${req.user._id}`)
     return res.status(200).json({message: "user updated successfully." , newUser: user});
 
 };
-
 
 export const updatePassword = async (req, res, next) => {
   let { oldPassword, newPassword } = req.body
@@ -265,4 +311,122 @@ export const updatePassword = async (req, res, next) => {
 
     return res.status(200).json({message: "password updated successfully." });
 
+};
+
+export const logOut = async (req, res, next) => {
+// logout from all devices
+    const { flag } = req.body ; 
+    
+    if (flag.toLowerCase() === "all"){
+        req.user.changeCredential = new Date();
+        await req.user.save();
+        // await db_service.deleteMany({ model: revokeTokenModel, filter: { userId: req.user._id }});
+        await deleteKey(await keys(get_key({ userId: req.user._id })));
+    }
+
+// logout from current device
+    else{
+
+        await setValue({
+            key: revoke_key({ userId: req.user._id, jti: req.decoded.jti }),
+            value: `${req.decoded.jti}`,
+            ttl: req.decoded.exp - Math.floor( Date.now() / 1000)
+            
+        })
+        // await db_service.create({
+        //     model: revokeTokenModel, 
+        //     data: {
+        //         tokenId: req.decoded.jti,
+        //         userId: req.user._id,
+        //         expiredAt: new Date ( req.decoded.exp * 1000)
+        //     }
+        // });
+    }
+        
+    return res.status(200).json({message: "Done." });
+
+
+}; 
+
+export const updateProfilePicture = async (req, res, next) => {
+
+    if (!req.file) {
+        throw new Error("Image is required", { cause: 400 });
+    }
+
+    let gallery = req.user.gallery;
+
+    if (req.user.profilePicture) {
+        gallery.push(req.user.profilePicture);
+    }
+
+    await db_service.findOneAndUpdate({
+        model: userModel,
+        filter: { _id: req.user._id },
+        update: {
+            profilePicture: req.file.path,
+            gallery: gallery
+        }
+    });
+
+    return res.status(200).json({
+        message: "Profile picture updated"
+    });
+};
+
+export const deleteProfilePicture = async (req, res, next) => {
+
+    if (!req.user.profilePicture) {
+        throw new Error("No profile picture found", { cause: 404 });
+    }
+
+    fs.unlink(req.user.profilePicture, (err) => {
+    if (err) throw err;
+    });
+
+    await db_service.updateOne({
+        model: userModel,
+        filter: { _id: req.user._id },
+        update: { profilePicture: null }
+    });
+
+    return res.status(200).json({
+        message: "Profile picture deleted successfully"
+    });
+};
+
+export const updateCoverPicture = async (req, res, next) => {
+    try {
+        const user = req.user;
+        const existingCovers = user.coverPictures || [];
+        const newUploads = req.files || [];
+
+        if (existingCovers.length >= 2)   {
+            return res.status(400).json({
+                message: "You already have 2 cover pictures. Cannot upload more."
+            });  
+        }
+
+        if ((existingCovers.length + newUploads.length) > 2) {
+             return res.status(400).json({
+                message: `You can only upload ${2 - existingCovers.length} more cover picture(s).`
+            });      
+        
+        }
+
+        // Save new cover pictures paths to DB
+        const newPaths = newUploads.map(file => file.path);
+        const updatedCovers = [...existingCovers, ...newPaths];
+
+        await db_service.updateOne({
+            model: userModel,
+            filter: { _id: user._id },
+            update: { coverPictures: updatedCovers }
+        });
+
+        return res.status(200).json({message: "Cover pictures updated successfully"});
+
+    } catch (err) {
+         throw new Error (err);
+    }
 };

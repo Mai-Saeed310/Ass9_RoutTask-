@@ -34,3 +34,20 @@ userRouter.get("/share_profile/:id",validation(
 
 userRouter.patch("/update-profile",authentication, validation(updateProfileSchema),US.updateProfile);
 userRouter.patch("/update-password",authentication, validation(updatePasswordSchema),US.updatePassword);
+userRouter.post("/log-out",authentication,US.logOut);
+
+
+
+userRouter.patch("/update-profile-picture",
+  authentication,
+  multer_local({ custom_path: "users/profile", custom_types: [...multer_enum.image] }).single("attachment"),
+  US.updateProfilePicture
+);
+
+userRouter.delete("/delete-profile-picture",authentication, US.deleteProfilePicture);
+
+userRouter.patch("/update-cover-picture", 
+  authentication,
+  multer_local({ custom_path: "users/cover-picture", custom_types: [...multer_enum.image] }).array("attachments"),
+  US.updateCoverPicture
+);

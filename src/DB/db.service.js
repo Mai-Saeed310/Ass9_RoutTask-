@@ -22,7 +22,6 @@ export const findOne = async ({ model, filter = {}, options = {} } = {}) => {
   return await doc.exec()
 }
 
-
 export const find = async ({ model, filter = {}, options = {} } = {}) => {
   const doc = model.find(filter)
 
@@ -65,4 +64,8 @@ export const updateOne = async ({ model, filter = {}, update = {}, options = {} 
 export const findOneAndUpdate = async ({ model, filter = {}, update = {}, options = {} } = {}) => {
   const doc = model.findOneAndUpdate(filter, update, { new: true, runValidators: true, ...options });
   return await doc.exec();
+}
+
+export const deleteMany = async ({ model, filter = {}} = {}) => {
+  return await model.deleteMany(filter);
 }
