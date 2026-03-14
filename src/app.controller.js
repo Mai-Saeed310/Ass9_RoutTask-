@@ -39,16 +39,22 @@ const bootstrap = async () => {
         fs.unlinkSync(req.file.path);
         }
     }
-
     if (req.files) {
+        if (Array.isArray(req.files)) {
+            req.files.forEach(file => {
+                if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+            });
+        }else {
         for (const key in req.files) {
-        for (const file of req.files[key]) {
-            if (fs.existsSync(file.path)) {
-            fs.unlinkSync(file.path);
+            for (const file of req.files[key]) {
+                if (fs.existsSync(file.path)) {
+                fs.unlinkSync(file.path);
+                }
+            }
             }
         }
-        }
     }
+
 
     res.status(500).json({
         status: err.cause || 500,

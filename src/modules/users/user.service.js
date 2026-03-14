@@ -405,6 +405,8 @@ export const updateCoverPicture = async (req, res, next) => {
             return res.status(400).json({
                 message: "You already have 2 cover pictures. Cannot upload more."
             });  
+
+            
         }
 
         if ((existingCovers.length + newUploads.length) > 2) {
