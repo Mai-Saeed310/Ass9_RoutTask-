@@ -76,7 +76,11 @@ phone: {
         enum: Object.values(providerEnum),
         default: providerEnum.System
     },
-    changeCredential: Date 
+    changeCredential: Date,
+    two_step_enabled: { 
+        type: Boolean, 
+        default: false
+    }
 }, {
     timestamps: true,
     // ensures that Mongoose filters out any fields in the query that aren't defined in the schema,

@@ -4,7 +4,7 @@ import { authentication } from "../middlewares/authentication.js";
 import { roleEnum } from "../../common/enum/user.enum.js";
 import { authorization } from "../middlewares/authorization.js";
 import { validation } from "../middlewares/validation.js";
-import { shareProfileSchema, signInSchema, signUpSchema, updatePasswordSchema, updateProfileSchema } from "./user.validation.js";
+import { confirmEmailSchema, shareProfileSchema, signInSchema, signUpSchema, updatePasswordSchema, updateProfileSchema } from "./user.validation.js";
 import { multer_host, multer_local } from "../middlewares/multer.js";
 import { multer_enum } from "../../common/enum/multer.enum.js";
 
@@ -51,3 +51,13 @@ userRouter.patch("/update-cover-picture",
   multer_local({ custom_path: "users/cover-picture", custom_types: [...multer_enum.image] }).array("attachments"),
   US.updateCoverPicture
 );
+
+userRouter.patch("/confirm-email",validation(confirmEmailSchema),US.confirmEmail);
+userRouter.post("/resend-otp",US.resendOtp);
+
+userRouter.post("/enable-two-step",authentication,US.enableTwoStep);
+userRouter.post("/confirm-two-step",authentication,US.confirmTwoStep);
+userRouter.post("/login-confirm-otp",US.loginConfirmOTP);
+userRouter.post("/update-passward",authentication,US.updatePassword );
+userRouter.post("/forget-passward",US.forgetPassword );
+userRouter.post("/reset-passward",US.resetPassword );

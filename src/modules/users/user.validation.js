@@ -109,3 +109,10 @@ export const updatePasswordSchema = {
         oldPassword: general_rules.password.required(),
     }).required()
 }
+
+export const confirmEmailSchema = {
+  body: joi.object({
+    email: general_rules.email.required(),
+    otp: joi.string().length(6).required(),
+  }).required()
+}

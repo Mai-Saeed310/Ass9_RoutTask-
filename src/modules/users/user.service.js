@@ -12,8 +12,10 @@ import { ACCESS_SECRET_KEY, CLIENT_ID, PREFIX, REFRESH_SECRET_KEY, SALT_ROUNDS }
 import cloudinary from "../../utilities/cloudinary.js";
 import { randomUUID } from "crypto";
 import { revokeTokenModel } from "../../models/revokeToken.model.js";
-import { deleteKey, get_key, keys, revoke_key, setValue } from "../../redis/redis.service.js";
+import { block_login_key, block_otp_key, deleteKey, expire, get, get_key, incr, keys, login_attempts_key, max_otp_key, otp_key, revoke_key, setValue, ttl } from "../../redis/redis.service.js";
 import fs from "node:fs";
+import { generateOtp, sendEmail } from "../../utilities/email/send.email.js";
+import { EventEmitter } from "events";
 
 export const signUp = async (req, res, next) => {
     const { userName, email, password, age, gender, phone } = req.body;
@@ -27,14 +29,13 @@ export const signUp = async (req, res, next) => {
         throw new Error("Email already exists",{cause:409});
     }
     // const { public_id, secure_url } = await cloudinary.uploader.upload(req.file.path,{folder:"user/profile",resource_type:"image"}); 
-    // const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
     let arr_paths = []
         for (const file of req.files.attachments) {
             arr_paths.push(file.path)
         }
 
-        if (arr_paths.length === 2) {
+        if (arr_paths.length !== 2) {
             throw new Error("Cover pictures must be exactly 2 images", { cause: 400 })
         }
 
@@ -51,6 +52,22 @@ export const signUp = async (req, res, next) => {
         }
     })
 
+    const otp = await generateOtp();
+    await sendEmail({
+    to: email,
+    subject: "welcome to saraha app",
+    html: `<h1>hello ${userName}</h1>
+    <p>Your otp is : ${otp}</p>`
+    });
+
+    await setValue({ 
+    key: otp_key({email}), 
+    value: Hash({ plainText: `${otp}` }), 
+    ttl: 60 * 2 
+    });
+
+    await setValue({ key: max_otp_key({ email }), value: 1, ttl: 60 *6  })
+
     res.status(201).json({ message: "done", user });
 };
 
@@ -58,22 +75,55 @@ export const signIn = async (req, res, next) => {
     const { email, password } = req.body;
 
     // 1. Check if user exists with this email AND signed up via 'system'
-const userExist = await userModel
-    .findOne({ email, provider: providerEnum.System })
+    const userExist = await userModel
+    .findOne({ email, provider: providerEnum.System ,confirmed: { $exists: true }})
     .select("+password");
 
     if (!userExist) {
           throw new Error("User does not exist",{cause:400});
     }
 
+    // check if user is blocked
+    const isBlocked = await ttl(block_login_key({ email }));
+    if (isBlocked > 0) {
+        throw new Error(`Your account is blocked, try again after ${isBlocked} seconds`, { cause: 400 });
+    }
+
     // 2. Validate password
     if (!Compare({ plainText: password, cipherText: userExist.password })) {
-      throw new Error("Invalid password",{cause:400});
+     const attempts_key = login_attempts_key({ email });
+
+    // increase attempts
+    const attempts = await incr(attempts_key);
+
+    // ttl for the attempts 
+    await expire({ key: attempts_key, ttl: 60*10 });
+
+     // block after 5 tries
+        if (attempts >= 5) {
+            await setValue({
+                key: block_login_key({ email }),
+                value: 1,
+                ttl: 60 * 5 // 5 minutes
+            });
+
+            await deleteKey(login_attempts_key({ email }));
+            throw new Error("Account blocked for 5 minutes", { cause: 400 });
+        }
+
+        throw new Error("Invalid password", { cause: 400 });
     }
-// OTP
-//     if (!userExist.confirmed) {
-//     throw new Error("Please verify your account", { cause: 400 });
-// }
+
+    // reset attempts after success
+    await deleteKey(login_attempts_key({ email }));
+
+    // 2-step verification
+    if (userExist.two_step_enabled) {
+        await sendEmailOtp({ email: userExist.email, subject: "Login Verification" });
+        return res.status(200).json({
+            message: "OTP sent to your email for 2-step verification"
+        });
+    }
 
     // to generate random token Id 
     const jwtId = randomUUID();
@@ -84,7 +134,6 @@ const userExist = await userModel
     options : {
         expiresIn: "1h",
         jwtid: jwtId
-
     }
    }); 
 
@@ -299,13 +348,16 @@ export const updateProfile = async (req, res, next) => {
 export const updatePassword = async (req, res, next) => {
   let { oldPassword, newPassword } = req.body
 
-    if (!Compare({ plainText: oldPassword, cipherText: req.user.password })) {
+  if (!Compare({ plainText: oldPassword, cipherText: req.user.password })) {
         throw new Error("inValid old password");
     }
 
     const hash = Hash({ plainText: newPassword })
 
     req.user.password = hash
+
+    // logout from all devices 
+    req.user.changeCredential = new Date();
 
     await req.user.save()
 
@@ -431,4 +483,252 @@ export const updateCoverPicture = async (req, res, next) => {
     } catch (err) {
          throw new Error (err);
     }
+};
+
+const sendEmailOtp = async ({ email, subject }) => {
+  const isBlocked = await ttl(block_otp_key({ email }));
+  if (isBlocked > 0) {
+    throw new Error(`you blocked please try again after ${isBlocked} seconds`);
+  }
+
+  const key = otp_key({ email, subject });
+
+  const ttlOtp = await ttl(key);
+  if (ttlOtp > 0) {
+    throw new Error(
+      `you already have otp not expired yet please try again after ${ttlOtp} seconds`
+    );
+  }
+
+  if ((await get({ key: max_otp_key({ email }) })) >= 3) {
+    await setValue({
+      key: block_otp_key({ email }),
+      value: 1,
+      ttl: 15 * 60,
+    });
+    throw new Error(`you exceed maximum number of trials`);
+  }
+
+  const otp = await generateOtp();
+
+  // 
+  await sendEmail({
+    to: email,
+    subject,
+    html: `<h1>your confirmation code is:${otp}</h1>`,
+  });
+
+  await setValue({
+    key,
+    value: Hash({ plainText: `${otp}` }),
+    ttl: 60 * 2,
+  });
+
+  await incr(max_otp_key({ email }));
+};
+
+
+export const confirmEmail = async (req, res, next) => {
+  const { email, otp } = req.body
+
+const otpValue = await get({ key: otp_key({ email }) })
+  if (!otpValue) {
+    throw new Error("otp expired");
+  }
+
+  if (!Compare({ plainText: otp, cipherText: otpValue })) {
+    throw new Error("inValid otp");
+  }
+
+  const user = await db_service.findOneAndUpdate({
+    model: userModel,
+    filter: { email ,confirmed: {$exists:false} , provider: providerEnum.System},
+    update: { confirmed: true }
+  })
+
+  if (!user) {
+    throw new Error("user not exist");
+  }
+
+  await deleteKey(otp_key({ email }))
+
+    res.status(201).json({ message: "email confirmed successfully" });
+}
+
+export const resendOtp = async (req, res, next) => {
+  const { email } = req.body
+
+  const user = await db_service.findOne({
+    model: userModel,
+    filter: { email, confirmed: { $exists: false }, provider: providerEnum.System },
+  })
+
+  if (!user) {
+    throw new Error("user not exist or already confirmed");
+  }
+
+    const isBlocked = await ttl(block_otp_key({ email }))
+    if (isBlocked > 0) {
+    throw new Error(`you have exceeded the maximum number of tries, please try again after ${isBlocked} seconds`);
+    }
+
+  // check if user has exsit OTP 
+  const TTL = await ttl(otp_key({ email }))
+  if (TTL > 0) {
+    throw new Error(`you can resend otp after ${TTL} seconds`);
+  }
+
+  const maxOtp = await get({ key: max_otp_key({ email }) })
+
+  if (maxOtp >= 3) {
+    // block user 
+    await setValue({ key: block_otp_key({ email }), value: 1, ttl: 60 })
+    throw new Error("you have exceeded the maximum number of tries");
+  }
+
+  const otp = await generateOtp()
+  await sendEmail({
+    to: user.email,
+    subject: "welcome to saraha app",
+    html: `<h1>hello ${user.userName}</h1>
+    <p>welcome to saraha app your otp is : ${otp}</p>`
+  })
+
+  await incr(max_otp_key({ email }));
+    res.status(201).json({ message: "done" });
+
+}
+
+export const enableTwoStep = async (req, res, next) => {
+    const userId = req.user.id; 
+    const user = await userModel.findById(userId);
+
+    if (!user) throw new Error("User not found", { cause: 404 });
+
+    // OTP to active step verification
+    await sendEmailOtp({ email: user.email, subject: "Enable 2-step verification" });
+
+    return res.status(200).json({
+        message: "OTP sent to your email to enable 2-step verification"
+    });
+};
+
+export const confirmTwoStep = async (req, res, next) => {
+    const { email, otp } = req.body;
+
+    const user = await userModel.findById(req.user._id);
+    if (!user) throw new Error("User not found", { cause: 404 });
+
+    const hashedOtp = await get({key: otp_key({ email, subject: "Enable 2-step verification" })});
+    if (!hashedOtp || !Compare({ plainText: otp, cipherText: hashedOtp })) {
+        throw new Error("Invalid OTP", { cause: 400 });
+    }
+
+    // active 2-step verification
+    user.two_step_enabled = true;
+    await user.save();
+
+    // delete otp after active  2-step verification
+    await deleteKey(otp_key({ email, subject: "Enable 2-step verification" }));
+
+    return res.status(200).json({ message: "2-step verification enabled successfully" });
+};
+
+export const loginConfirmOTP = async (req, res, next) => {
+    const { email, otp } = req.body;
+
+    const user = await userModel.findOne({ email });
+    if (!user) throw new Error("User not found", { cause: 404 });
+
+    if (!user.two_step_enabled) {
+        throw new Error("2-step verification is not enabled for this account", { cause: 400 });
+    }
+
+    const hashedOtp = await get({key:otp_key({ email, subject: "Login Verification" })});
+    if (!hashedOtp || !Compare({ plainText: otp, cipherText: hashedOtp })) {
+        throw new Error("Invalid OTP", { cause: 400 });
+    }
+
+    // otp send it correctly so delete the key
+    await deleteKey(otp_key({ email, subject: "Login Verification" }));
+
+    // toekns 
+    const jwtId = randomUUID();
+    const access_token = GenerateToken({
+        payload: { id: user._id },
+        secret_key: ACCESS_SECRET_KEY,
+        options: { expiresIn: "1h", jwtid: jwtId }
+    });
+    const refresh_token = GenerateToken({
+        payload: { id: user._id },
+        secret_key: REFRESH_SECRET_KEY,
+        options: { expiresIn: "1y", jwtid: jwtId }
+    });
+
+    return res.status(200).json({
+        message: "Login successful",
+        access_token,
+        refresh_token
+    });
+};
+
+export const forgetPassword = async (req, res, next) => {
+  const { email } = req.body;
+  const user = await db_service.findOne({
+    model: userModel,
+    filter: {
+      email,
+      confirmed: { $exists: true },
+      provider: providerEnum.System,
+    },
+  });
+
+  if (!user) {
+    throw new Error("user not exist or not confirmed");
+  }
+
+  await sendEmailOtp({ email, subject: "forgetPassword"});
+
+    res.status(200).json({ message: "OTP send it to the email" });
+};
+
+export const resetPassword = async (req, res, next) => {
+  const { email, otp, newPassword } = req.body;
+
+  const user = await db_service.findOne({
+    model: userModel,
+    filter: { email },
+  });
+
+  if (!user) {
+    throw new Error("User not found", { cause: 404 });
+  }
+
+  // 1. check OTP
+  const storedOtp = await get({ 
+    key: otp_key({ email, subject: "forgetPassword" }) 
+  });
+
+  if (!storedOtp) {
+    throw new Error("OTP expired", { cause: 400 });
+  }
+
+  if (!Compare({ plainText: otp, cipherText: storedOtp })) {
+    throw new Error("Invalid OTP", { cause: 400 });
+  }
+
+  // 2. update password
+  user.password = Hash({ plainText: newPassword });
+
+  // (logout from all devices)
+  user.changeCredential = new Date();
+
+  await user.save();
+
+  // 3. delete OTP
+  await deleteKey(otp_key({ email, subject: "forgetPassword" }));
+
+  return res.status(200).json({
+    message: "Password reset successfully",
+  });
 };

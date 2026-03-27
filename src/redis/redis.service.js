@@ -3,9 +3,31 @@ import { redisClient } from "../DB/redis.db.js";
 export const revoke_key = ({userId, jti}) => {
   return `revoke_token::${userId}::${jti}`
 }
+
 export const get_key = ({ userId }) => {
     return `revoke_token::${userId}`
 }
+
+export const otp_key = ({ email, subject }) => {
+    return `otp::${email}::${subject}`;
+}
+
+export const max_otp_key = ({ email }) => {
+    return `otp::${email}::max_tries`
+}
+
+export const block_otp_key = ({ email }) => {
+    return `otp::${email}::block`
+}
+
+export const block_login_key = ({ email }) => {
+    return `login::${email}::block`
+}
+
+export const login_attempts_key  = ({ email }) => {
+   return `login_attempts::${email}`;
+}
+
 export const setValue = async ({ key, value, ttl } = {}) => {
     try {
         // to conver data to string if it is object
@@ -89,4 +111,12 @@ export const expire = async ({ key, ttl } = {}) => {
     } catch (error) {
         console.log("fail to set operation", error);
     }
+}
+
+export const incr = async (key) => {
+  try {
+    return await redisClient.incr(key)
+  } catch (error) {
+    console.log(error, "fail to increament operation");
+  }
 }
