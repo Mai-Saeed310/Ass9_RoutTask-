@@ -7,11 +7,9 @@ import { validation } from "../middlewares/validation.js";
 import * as Schema from "./user.validation.js";
 import { multer_host, multer_local } from "../middlewares/multer.js";
 import { multer_enum } from "../../common/enum/multer.enum.js";
-import { messageRouter } from "../messages/message.controller.js";
 
 
-export const userRouter = Router ({ mergeParams: true }); 
-userRouter.use("/:userID/messages",messageRouter)
+export const userRouter = Router (); 
 
 // userRouter.post("/signUp",multer_local().single("attachements"),US.signUp);
 
@@ -61,8 +59,5 @@ userRouter.post("/enable-two-step",authentication,US.enableTwoStep);
 userRouter.post("/confirm-two-step",authentication,US.confirmTwoStep);
 userRouter.post("/login-confirm-otp",US.loginConfirmOTP);
 userRouter.post("/update-passward",authentication,US.updatePassword );
-userRouter.post("/forget-passward-usingOTP",validation(Schema.reSendOtpSchema),US.forgetPasswordOtp );
-userRouter.post("/reset-passward",validation(Schema.resetPasswordSchema),US.resetPasswordOtp );
-//  forgot password using onetime access link 
-userRouter.post("/forget-passward-usingLink",US.forgetPasswordLink );
-userRouter.post("/reset-passward-usingLink",US.resetPasswordLink );
+userRouter.post("/forget-passward",validation(Schema.reSendOtpSchema),US.forgetPassword );
+userRouter.post("/reset-passward",validation(Schema.resetPasswordSchema),US.resetPassword );

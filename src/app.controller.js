@@ -5,6 +5,9 @@ import cors from 'cors';
 import { PORT } from "../config/config.service.js";
 import fs from "fs"
 import { redisClient, redisConnection } from "./DB/redis.db.js";
+import { messageRouter } from "./modules/messages/message.controller.js";
+import helmet from "helmet"
+import { rateLimit } from 'express-rate-limit'
 
 const app = express(); 
 const port = PORT ; 
@@ -12,12 +15,21 @@ const port = PORT ;
 
 const bootstrap = async () => { 
 
+    const limiter = rateLimit({
+        windowMs: 15 * 60 * 1000, 
+        limit: 50
+    })
+
+    app.use(limiter)
+
     checkConncetionDB(); 
     redisConnection();
     app.use(cors());
+    app.use(helmet()); 
     app.use("/uploads",express.static("uploads"));
     app.use(express.json());
     app.use("/users",userRouter);
+    app.use("/messages",messageRouter);
 
     
 

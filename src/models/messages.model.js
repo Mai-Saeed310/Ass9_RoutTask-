@@ -1,28 +1,25 @@
-import mongoose, { Types } from "mongoose";
+import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
-const noteSchema = new Schema({
- title: {
-  type: String,
-  required: true,
-  validate: {
-    validator: function (value) {
-      return value !== value.toUpperCase();
+const messageSchema = new Schema({
+    content: {
+        type: String,
+        required: [true, 'Message content is required'],
+        minLength: 1
     },
-    message: "Title must not be entirely uppercase"
-  }
-},
-  content: {
-    type: String,
-    required: true,
-  },
-  userId: {
-    type: Types.ObjectId,
-     required: true,
-     ref: "User"
-  }
+    attachments: [String],
+    userId: {
+        type: Schema.Types.ObjectId,
+        // Ensure this matches your User model's name exactly
+        ref: 'userModel', 
+        required: true,
+    },
 }, {
-    timestamps: true
+    timestamps: true,
+    strictQuery:true
 });
+
+
 // create model
-export const note =  mongoose.model("Note", noteSchema);
+export const messageModel = mongoose.model("messageModel", messageSchema);
+

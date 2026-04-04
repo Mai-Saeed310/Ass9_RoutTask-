@@ -81,7 +81,10 @@ export const signInSchema = {
 
 export const shareProfileSchema = {
     params: joi.object({
-        id: general_rules.id
+        id: joi.string().custom((value,helper)=>{
+            const isValid = Types.ObjectId.isValid(value)
+            return isValid ? value : helper.message("invalid mongodb id")
+        })
         
     }).required()
 }

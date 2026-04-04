@@ -592,11 +592,12 @@ export const resendOtp = async (req, res, next) => {
     throw new Error("you have exceeded the maximum number of tries");
   }
 
-  const otp = await generateOtp();
+  const otp = await generateOtp()
   await sendEmail({
     to: user.email,
     subject: "welcome to saraha app",
-    html: emailTemplate(otp)
+    html: `<h1>hello ${user.userName}</h1>
+    <p>welcome to saraha app your otp is : ${otp}</p>`
   })
 
   await incr(max_otp_key({ email }));
@@ -677,7 +678,7 @@ export const loginConfirmOTP = async (req, res, next) => {
     });
 };
 
-export const forgetPasswordOtp = async (req, res, next) => {
+export const forgetPassword = async (req, res, next) => {
   const { email } = req.body;
   const user = await db_service.findOne({
     model: userModel,
@@ -697,7 +698,7 @@ export const forgetPasswordOtp = async (req, res, next) => {
     res.status(200).json({ message: "OTP send it to the email" });
 };
 
-export const resetPasswordOtp = async (req, res, next) => {
+export const resetPassword = async (req, res, next) => {
   const { email, otp, newPassword } = req.body;
 
   // 1. check OTP
@@ -726,77 +727,5 @@ export const resetPasswordOtp = async (req, res, next) => {
 
   return res.status(200).json({
     message: "Password reset successfully",
-  });
-};
-
-export const forgetPasswordLink = async (req, res, next) => {
-  const { email } = req.body;
-  const user = await db_service.findOne({
-    model: userModel,
-    filter: {
-      email,
-      confirmed: { $exists: true },
-      provider: providerEnum.System,
-    },
-  });
-
-  if (!user) {
-    throw new Error("user not exist or not confirmed");
-  }
-
-  // generate token
-  const token = randomUUID();
-
-  await setValue({
-    key: `resetPassword::${token}`,
-    value: user._id.toString(),
-    ttl: 60 * 10  // expire after 10 min
-  });
-
-  // send email
-  const link = `http://localhost:3000/reset-password?token=${token}`;
-
-  await sendEmail({
-    to: email,
-    subject: "Reset Password",
-    html: `
-      <h2>Reset your password</h2>
-      <p>Click the link below:</p>
-      <a href="${link}">Reset Password</a>
-      <p>This link expires in 10 minutes</p>
-    `
-  });
-
-  res.json({ message: "Reset link sent to email" });
-};
-
-export const resetPasswordLink = async (req, res, next) => {
-  const { token, newPassword } = req.body;
-
-  const userId = await get({ key: `resetPassword::${token}` });
-
-  if (!userId) {
-    throw new Error("Invalid or expired token");
-  }
-
-  const user = await db_service.findById({
-    model: userModel,
-    id: userId
-  });
-
-  if (!user) {
-    throw new Error("User not found");
-  }
-
-  user.password = Hash({ plainText: newPassword });
-
-  user.changeCredential = new Date();
-
-  await user.save();
-
-  await deleteKey(`resetPassword::${token}`);
-
-  return res.status(200).json({
-    message: "Password reset successfully"
   });
 };

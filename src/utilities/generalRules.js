@@ -1,5 +1,12 @@
 import joi from "joi"
 import { genderEnum } from "../common/enum/user.enum.js"
+import { Types } from "mongoose";
+
+
+export const customID = (value,helper)=> {
+   const isValid = Types.ObjectId.isValid(value)
+   return isValid ? value : helper.message("invalid mongodb id")
+}
 
 export const general_rules = {
     email: joi.string().trim().email().required(),
@@ -20,4 +27,6 @@ export const general_rules = {
   }).messages({
     'any.required': "file is required"
   }),
+  id: joi.string().custom(customID)
 }
+
